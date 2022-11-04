@@ -1,0 +1,137 @@
+* Notes
+<2022-11-04 Fri 12:37>: The process of authenticating via a login page to a Ruby On Rails application includes the following steps:
+- User navigates to the login form on the React frontend
+- User enters their username
+- User submits the form to make a 'POST' request to the '/login' API endpoint on the Ruby On Rails backend
+- Within the 'create' action in the 'SessionsController', a cookie is set on the user's browser by writing the user ID into the session hash
+- The user is then logged in, and 'session[:user_id] holds the user ID
+
+The 'config/routes.rb' routes file needs to be adjusted for the 'SessionsController#create' meethod:
+#+begin_src ruby
+post "/login", to: "sessions#create"
+#+end_src
+
+The related 'SessionsController#create' method would look like this:
+#+begin_src ruby
+  class SessionsController < ApplicationController
+    def create
+      user = User.find(username: params[:username])
+      session[:user_id] = user.id
+      render json: user
+    end
+  end
+#+end_src
+
+The frontend component's 'login' React component would look like this:
+#+begin_src js
+function Login({ onLogin }) {
+  const [username, setUsername] = useState("");
+
+  function handleSubmit(e) {
+    e.preventDefault();
+    fetch("/login", {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json",
+      },
+      body: JSON.stringify({ username }),
+    })
+      .then((r) => r.json())
+      .then((user) => onLogin(user));
+  }
+
+  return (
+    <form onSubmit={handleSubmit}>
+      <input
+        type="text"
+        value={username}
+        onChange={(e) => setUsername(e.target.value)}
+      />
+      <button type="submit">Login</button>
+    </form>
+  );
+}
+#+end_src
+
+The 'onLogin' function would handle saving the logged in user's details in state.
+
+NOTE:
+- The backend knows that we are logged in via the 'session[:user_id]' value
+- The frontend knows that we are logged in because our user data was saved in state after logging in with the 'setUsername' useState function
+- However, if you refresh the page, the frontend doesn't know that you are logged in, yet the backend still does
+
+You then need to adjust the 'config/routes.rb' routes file with an additional route:
+#+begin_src ruby
+get "/me", to: "users#show"
+#+end_src
+
+And you then need to create a related Controller action accordingly:
+#+begin_src ruby
+  class UsersController < ApplicationController
+    def show
+      user = User.find_by(id: session[:user_id])
+      if user
+        render json: user
+      else
+        render json: { error: "Not authorized"}, status: :unauthorized
+      end
+    end
+  end
+#+end_src
+
+We then adjust the frontend via the 'useEffect' hook to be accommodating to login the user as soon as the application loads if the backend already knows they're logged in:
+#+begin_src js
+function App() {
+  const [user, setUser] = useState(null);
+
+  useEffect(() => {
+    fetch("/me").then((response) => {
+      if (response.ok) {
+        response.json().then((user) => setUser(user));
+      }
+    });
+  }, []);
+
+  if (user) {
+    return <h2>Welcome, {user.username}!</h2>;
+  } else {
+    return <Login onLogin={setUser} />;
+  }
+}
+#+end_src
+
+Creating a 'logout' route requires the following adjustment to the 'config/routes.rb' routes file:
+#+begin_src ruby
+  delete "/logout", to: "sessions#destroy"
+#+end_src
+
+I then added a "SessionsController#destroy" method to the 'SessionsController' which clears the username out of the session:
+#+begin_src ruby
+  def destroy
+    session.delete :user_id
+    head :no_content
+  end
+#+end_src
+
+This is what the React frontend would look like to include the 'destroy' method:
+#+begin_src js
+function Navbar({ onLogout }) {
+  function handleLogout() {
+    fetch("/logout", {
+      method: "DELETE",
+    }).then(() => onLogout());
+  }
+
+  return (
+    <header>
+      <button onClick={handleLogout}>Logout</button>
+    </header>
+  );
+}
+#+end_src
+
+Answers To Check Your Understanding:
+- Q1. In the login and authentication flow you learned in this lesson for Rails API/React applications, in what two places is authentication information stored?
+- Answer: Within the 'session[:user_id]' hash on the Rails backend, and also within the state variable for 'username' within the React frontend application
+- Q2. In the login and authentication flow you learned in this lesson, what sequence of events happens if the user refreshes the page?
+- Answer: Without corrections, the backend remembers the user, but the frontend does not. After corrections with the 'useEffect' block, the '/me' API endpoint is reached out to, and if a successful response occurs, the 'setUsername' useState function then sets the current user as logged in again.
